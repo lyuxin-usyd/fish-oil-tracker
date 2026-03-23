@@ -1,0 +1,41 @@
+name: Daily Fish Oil Scraper
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # UTC 00:00 = Beijing 08:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 可选：如果 requests 方案失败需要 playwright，取消下面两步的注释
+      # - name: Install Playwright browsers (optional)
+      #   run: playwright install chromium
+
+      - name: Run scraper
+        run: python scraper.py
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "chore: update fish oil price data $(date '+%Y-%m-%d')"
+          git push

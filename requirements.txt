@@ -1,0 +1,11 @@
+streamlit
+pandas
+plotly
+requests
+beautifulsoup4
+lxml
+numpy
+
+# playwright 可选：仅当 requests 方案无法抓取（需要 JS 渲染）时启用
+# 启用后还需在 scraper.yml 中取消注释 "Install Playwright browsers" 步骤
+# playwright
