@@ -150,7 +150,7 @@ def load_latest_data() -> pd.DataFrame:
             reverse=True,
         )
         if files:
-            df = pd.read_csv(os.path.join(DATA_DIR, files[0]))
+            df = pd.read_csv(os.path.join(DATA_DIR, files[0]), encoding='utf-8')
             return df
     except Exception:
         pass
@@ -172,7 +172,7 @@ def load_all_data() -> pd.DataFrame:
     try:
         path = os.path.join(DATA_DIR, "all_data.csv")
         if os.path.exists(path):
-            return pd.read_csv(path)
+            return pd.read_csv(path, encoding='utf-8')
     except Exception:
         pass
 
@@ -300,26 +300,28 @@ def chart_price_band(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def chart_brand_price(df: pd.DataFrame) -> go.Figure:
-    """各品牌平均售价条形图（已知品牌，按均价升序）"""
-    tmp = df.dropna(subset=["brand", "price"]).copy()
-    brand_avg = (
-        tmp.groupby("brand")["price"]
-        .mean()
+def chart_brand_influence(df: pd.DataFrame) -> go.Figure:
+    """品牌BSR影响力 = Σ(1/rank)，rank越小分越高，按影响力降序"""
+    tmp = df.dropna(subset=["brand", "rank"]).copy()
+    tmp = tmp[tmp["rank"] > 0]
+
+    brand_influence = (
+        tmp.groupby("brand")
+        .agg(influence=("rank", lambda x: (1.0 / x).sum()), count=("rank", "count"))
         .reset_index()
-        .rename(columns={"price": "avg_price"})
-        .sort_values("avg_price")
+        .sort_values("influence", ascending=True)  # ascending=True → plotly horizontal bar shows highest at top
     )
+
     fig = px.bar(
-        brand_avg,
-        x="avg_price",
+        brand_influence,
+        x="influence",
         y="brand",
         orientation="h",
-        title="各品牌平均售价对比",
+        title="品牌BSR影响力排行（Σ 1/rank）",
         template=PLOTLY_TEMPLATE,
-        color_discrete_sequence=[PRIMARY_COLOR],
-        text=brand_avg["avg_price"].apply(lambda x: f"${x:.0f}"),
-        labels={"avg_price": "平均售价（$）", "brand": "品牌"},
+        color_discrete_sequence=["#1f77b4"],
+        text=brand_influence["count"].apply(lambda x: f"{int(x)}款"),
+        labels={"influence": "BSR影响力得分", "brand": "品牌"},
     )
     fig.update_traces(textposition="outside")
     fig.update_layout(
@@ -328,7 +330,7 @@ def chart_brand_price(df: pd.DataFrame) -> go.Figure:
         title_font_size=15,
         margin=dict(t=40, b=10, l=10, r=80),
         showlegend=False,
-        height=max(300, len(brand_avg) * 28),
+        height=max(300, len(brand_influence) * 28),
     )
     return fig
 
@@ -645,17 +647,35 @@ elif module == "价格监控":
     # ── 第一行：商品选择 ────────────────────────────────────────────────────
     st.subheader("🔍 商品价格监控")
 
-    product_options = dict(zip(filtered_df["title"], filtered_df["asin"]))
-    if not product_options:
+    if filtered_df.empty:
         st.warning("无可选商品，请调整筛选条件。")
         st.stop()
 
-    selected_title = st.selectbox(
-        "选择商品",
-        options=list(product_options.keys()),
-        format_func=lambda x: x[:80] + "..." if len(x) > 80 else x,
+    import re as _re_label
+
+    def make_product_label(row):
+        title = str(row.get('title', ''))
+        brand = str(row.get('brand', '?'))[:15]
+        price = f"${row.get('price', 0):.2f}"
+        # 提取mg含量
+        mg_match = _re_label.search(r'(\d+(?:,\d+)?)\s*mg', title, _re_label.IGNORECASE)
+        mg = mg_match.group(0) if mg_match else ''
+        # 提取粒数
+        count_match = _re_label.search(r'(\d+)\s*(?:softgels?|count|ct)', title, _re_label.IGNORECASE)
+        count = f"{count_match.group(1)}粒" if count_match else ''
+        return f"{brand} · {mg} · {count} · {price}"
+
+    labels = filtered_df.apply(make_product_label, axis=1).tolist()
+    asins = filtered_df["asin"].tolist()
+    titles = filtered_df["title"].tolist()
+
+    selected_label = st.selectbox(
+        "选择商品（品牌 · Omega含量 · 粒数 · 价格）",
+        options=labels,
     )
-    selected_asin = product_options[selected_title]
+    selected_idx = labels.index(selected_label)
+    selected_asin = asins[selected_idx]
+    selected_title = titles[selected_idx]
 
     # 选中商品简要信息
     selected_row = filtered_df[filtered_df["asin"] == selected_asin].iloc[0]
