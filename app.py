@@ -300,68 +300,78 @@ def chart_price_band(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def chart_brand_pie(df: pd.DataFrame) -> go.Figure:
-    brand_df = safe_get_brand_concentration(df)
-    val_col = "product_count" if "product_count" in brand_df.columns else brand_df.columns[1]
-    fig = px.pie(
-        brand_df,
-        names="brand" if "brand" in brand_df.columns else brand_df.columns[0],
-        values=val_col,
-        title="品牌集中度",
-        template=PLOTLY_TEMPLATE,
-        hole=0.35,
+def chart_brand_price(df: pd.DataFrame) -> go.Figure:
+    """各品牌平均售价条形图（已知品牌，按均价升序）"""
+    tmp = df.dropna(subset=["brand", "price"]).copy()
+    brand_avg = (
+        tmp.groupby("brand")["price"]
+        .mean()
+        .reset_index()
+        .rename(columns={"price": "avg_price"})
+        .sort_values("avg_price")
     )
+    fig = px.bar(
+        brand_avg,
+        x="avg_price",
+        y="brand",
+        orientation="h",
+        title="各品牌平均售价对比",
+        template=PLOTLY_TEMPLATE,
+        color_discrete_sequence=[PRIMARY_COLOR],
+        text=brand_avg["avg_price"].apply(lambda x: f"${x:.0f}"),
+        labels={"avg_price": "平均售价（$）", "brand": "品牌"},
+    )
+    fig.update_traces(textposition="outside")
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
         title_font_size=15,
-        margin=dict(t=40, b=10, l=10, r=10),
-        legend=dict(font_size=11),
+        margin=dict(t=40, b=10, l=10, r=80),
+        showlegend=False,
+        height=max(300, len(brand_avg) * 28),
     )
     return fig
 
 
-def chart_scatter(df: pd.DataFrame) -> go.Figure:
-    scatter_df = safe_get_rank_rating_data(df)
-    scatter_df = scatter_df.dropna(subset=["rank", "rating", "review_count", "price"])
-    scatter_df = scatter_df.copy()
-    scatter_df["price_label"] = scatter_df["price"].apply(lambda x: f"${x:.0f}")
-    scatter_df["brand_short"] = scatter_df["brand"].fillna("?").apply(lambda x: x[:12])
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=scatter_df["rank"],
-        y=scatter_df["rating"],
-        mode="markers+text",
-        text=scatter_df["price_label"],
-        textposition="middle center",
-        textfont=dict(size=9, color="white", family="Arial Black"),
-        marker=dict(
-            size=scatter_df["review_count"].apply(lambda x: max(20, min(60, x / 1500))),
-            color=PRIMARY_COLOR,
-            opacity=0.75,
-            line=dict(width=1, color="white"),
-        ),
-        customdata=scatter_df[["title", "brand", "price", "review_count"]].values,
-        hovertemplate=(
-            "<b>%{customdata[1]}</b><br>"
-            "%{customdata[0]:.50s}<br>"
-            "价格: $%{customdata[2]:.2f}<br>"
-            "评分: %{y}<br>"
-            "评价数: %{customdata[3]:,}<br>"
-            "排名: #%{x}"
-            "<extra></extra>"
-        ),
-    ))
-    fig.update_layout(
-        title="排名 vs 评分（气泡越大=评价数越多，标价=售价）",
+def chart_price_rank(df: pd.DataFrame) -> go.Figure:
+    """售价排行：按售价升序，显示品牌+价格，前20条"""
+    tmp = df.dropna(subset=["price", "rank"]).sort_values("price").head(20).copy()
+    tmp["label"] = tmp["brand"].fillna("?").apply(lambda x: x[:18]) + "  $" + tmp["price"].apply(lambda x: f"{x:.0f}")
+    fig = px.bar(
+        tmp, x="price", y="label", orientation="h",
+        title="售价排行（低→高，前20）",
         template=PLOTLY_TEMPLATE,
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        title_font_size=15,
-        margin=dict(t=40, b=10, l=10, r=10),
-        xaxis_title="销售排名（BSR）",
-        yaxis_title="评分",
-        showlegend=False,
+        color_discrete_sequence=[PRIMARY_COLOR],
+        text=tmp["price"].apply(lambda x: f"${x:.2f}"),
+        labels={"price": "售价（$）", "label": ""},
+    )
+    fig.update_traces(textposition="outside")
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        title_font_size=15, margin=dict(t=40, b=10, l=10, r=60),
+        height=max(300, len(tmp) * 30), yaxis=dict(tickfont=dict(size=11)),
+    )
+    return fig
+
+
+def chart_rating_rank(df: pd.DataFrame) -> go.Figure:
+    """评分排行：按评分降序，标注评价数，前20条"""
+    tmp = df.dropna(subset=["rating", "review_count"]).sort_values("rating", ascending=False).head(20).copy()
+    tmp["label"] = tmp["brand"].fillna("?").apply(lambda x: x[:18]) + "  ★" + tmp["rating"].apply(lambda x: f"{x:.1f}")
+    fig = px.bar(
+        tmp, x="rating", y="label", orientation="h",
+        title="评分排行（高→低，前20）",
+        template=PLOTLY_TEMPLATE,
+        color_discrete_sequence=["#2ecc71"],
+        text=tmp["rating"].apply(lambda x: f"{x:.1f}"),
+        labels={"rating": "评分", "label": ""},
+    )
+    fig.update_traces(textposition="outside")
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        title_font_size=15, margin=dict(t=40, b=10, l=10, r=60),
+        height=max(300, len(tmp) * 30), xaxis=dict(range=[3, 5.2]),
+        yaxis=dict(tickfont=dict(size=11)),
     )
     return fig
 
@@ -543,19 +553,27 @@ if module == "选品分析":
         )
     with col_right:
         st.plotly_chart(
-            chart_brand_pie(filtered_df),
+            chart_brand_price(filtered_df),
             use_container_width=True,
             config={"displayModeBar": False},
         )
 
     st.markdown("---")
 
-    # ── 第三行：排名 vs 评分散点图 ──────────────────────────────────────────
-    st.plotly_chart(
-        chart_scatter(filtered_df),
-        use_container_width=True,
-        config={"displayModeBar": False},
-    )
+    # ── 第三行：售价排行 + 评分排行 ─────────────────────────────────────────
+    col_price, col_rating = st.columns(2)
+    with col_price:
+        st.plotly_chart(
+            chart_price_rank(filtered_df),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
+    with col_rating:
+        st.plotly_chart(
+            chart_rating_rank(filtered_df),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
 
     st.markdown("---")
 
