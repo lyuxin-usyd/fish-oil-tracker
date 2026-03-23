@@ -280,14 +280,16 @@ def safe_get_summary_stats(df: pd.DataFrame) -> dict:
 
 def chart_price_band(df: pd.DataFrame) -> go.Figure:
     band_df = safe_get_price_band_distribution(df)
+    y_col = "product_count" if "product_count" in band_df.columns else (band_df.columns[1] if len(band_df.columns) > 1 else band_df.columns[0])
+    x_col = "price_range" if "price_range" in band_df.columns else band_df.columns[0]
     fig = px.bar(
         band_df,
-        x=band_df.columns[0],
-        y="count",
+        x=x_col,
+        y=y_col,
         title="价格带分布",
         template=PLOTLY_TEMPLATE,
         color_discrete_sequence=[PRIMARY_COLOR],
-        labels={band_df.columns[0]: "价格区间", "count": "商品数量"},
+        labels={x_col: "价格区间", y_col: "商品数量"},
     )
     fig.update_layout(
         plot_bgcolor="rgba(0,0,0,0)",
@@ -300,10 +302,11 @@ def chart_price_band(df: pd.DataFrame) -> go.Figure:
 
 def chart_brand_pie(df: pd.DataFrame) -> go.Figure:
     brand_df = safe_get_brand_concentration(df)
+    val_col = "product_count" if "product_count" in brand_df.columns else brand_df.columns[1]
     fig = px.pie(
         brand_df,
-        names=brand_df.columns[0],
-        values="count",
+        names="brand" if "brand" in brand_df.columns else brand_df.columns[0],
+        values=val_col,
         title="品牌集中度",
         template=PLOTLY_TEMPLATE,
         hole=0.35,
