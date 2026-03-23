@@ -241,32 +241,42 @@ def extract_asin_from_url(url: str) -> str | None:
     return None
 
 
+FISH_OIL_KEYWORDS = [
+    "fish oil", "omega-3", "omega 3", "omega3", "dha", "epa", "cod liver oil",
+    "krill oil", "algae oil", "algal oil", "flaxseed oil", "fatty acid",
+    "fish oil supplement",
+]
+
+def is_fish_oil_product(title: str) -> bool:
+    """过滤非鱼油/omega-3商品"""
+    if not title:
+        return False
+    t = title.lower()
+    return any(kw in t for kw in FISH_OIL_KEYWORDS)
+
+
 def parse_brand_from_title(title: str) -> str | None:
-    """
-    简单从标题首词猜测品牌。
-    Amazon BSR 页面通常标题第一个词/短语是品牌名。
-    更准确的做法是去商品页读取 Brand 字段，但这里不单独抓商品页。
-    """
+    """从标题解析品牌，优先匹配已知品牌列表，匹配不到返回None"""
     if not title:
         return None
-    # 常见鱼油品牌关键词列表（用于识别多词品牌）
     known_brands = [
-        "Nordic Naturals", "Nature Made", "Carlson", "Viva Naturals",
-        "Sports Research", "Bronson", "NOW Foods", "Doctor's Best",
-        "Life Extension", "Solgar", "Jarrow Formulas", "Nutrigold",
-        "Garden of Life", "New Chapter", "Pure Encapsulations",
-        "MegaRed", "Kirkland", "WHC", "Wiley's Finest", "Omega-3",
-        "OmegaBrite", "Coromega", "BioSchwartz", "Performance Lab",
-        "Thorne", "Vital Proteins", "Renew Life", "Nature's Bounty",
-        "Naturo Sciences", "Arazo Nutrition",
+        "Nordic Naturals", "Nature Made", "Nature's Bounty", "NatureWise",
+        "Carlson", "Carlyle", "Viva Naturals", "Sports Research", "Bronson",
+        "NOW Foods", "Doctor's Best", "Dr. Tobias", "Life Extension", "Solgar",
+        "Jarrow Formulas", "Nutrigold", "Nutricost", "Garden of Life",
+        "New Chapter", "Pure Encapsulations", "MegaRed", "Kirkland Signature",
+        "Kirkland", "WHC", "Wiley's Finest", "OmegaBrite", "Coromega",
+        "BioSchwartz", "Performance Lab", "Thorne", "THORNE", "Renew Life",
+        "Naturo Sciences", "Arazo Nutrition", "Horbäach", "Icelandic",
+        "Qunol", "Purity Products", "Barlean's", "Metagenics", "Oceanblue",
+        "Livingood", "Live Conscious", "Amazon Basics", "MAJU", "Zhou",
+        "Freshfield", "InnoSupps", "Physician's CHOICE",
     ]
-    title_upper = title.strip()
+    t = title.strip()
     for brand in known_brands:
-        if title_upper.lower().startswith(brand.lower()):
+        if t.lower().startswith(brand.lower()):
             return brand
-    # 退而求其次：取第一个词
-    first_word = title_upper.split()[0] if title_upper else None
-    return first_word
+    return None  # 未知品牌返回None，不瞎猜
 
 
 # ──────────────────────────────────────────────
@@ -618,7 +628,7 @@ def run():
             continue
 
         page_items = parse_items(html, page_offset=page_offset)
-        valid = [it for it in page_items if it is not None]
+        valid = [it for it in page_items if it is not None and is_fish_oil_product(it.get("title", ""))]
         invalid = len(page_items) - len(valid)
 
         logger.info(f"本页解析: 成功 {len(valid)} 条，失败 {invalid} 条")
