@@ -646,7 +646,7 @@ if module == "选品分析":
             "price": "价格($)",
             "rating": "评分",
             "review_count": "评价数",
-            "rank": "排名",
+            "rank": "BSR排名↑（越小越好）",
         }
         show_df = rec_df[[c for c in display_cols if c in rec_df.columns]].rename(
             columns=display_cols

@@ -153,12 +153,11 @@ def get_recommended_products(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.dropna(subset=["rank", "rating", "review_count"])
 
-    # 排名前 30%（rank 越小 = 排名越靠前）
-    rank_threshold = df["rank"].quantile(0.30)
+    # 筛选条件：BSR排名≤200 + 评分≥4.5 + 评价数≥10000
     mask = (
-        (df["rank"] <= rank_threshold)
-        & (df["rating"] >= 4.0)
-        & (df["review_count"] >= 500)
+        (df["rank"] <= 200)
+        & (df["rating"] >= 4.5)
+        & (df["review_count"] >= 10000)
     )
     result = df[mask].sort_values("rank").reset_index(drop=True)
     return result
