@@ -223,10 +223,16 @@ def safe_get_recommended_products(df: pd.DataFrame) -> pd.DataFrame:
             return get_recommended_products(df)
         except Exception:
             pass
-    # 评分>=4.5，评价数>=1000，价格<=30
-    rec = df[(df["rating"] >= 4.5) & (df["review_count"] >= 1000) & (df["price"] <= 30)].copy()
-    rec = rec.sort_values("review_count", ascending=False).head(10)
-    return rec[["asin", "brand", "title", "price", "rating", "review_count", "rank"]]
+    # 修改推荐逻辑：排名<=200 + 评分>=4.5 + 评价数>=10000
+    mask = (df["rating"] >= 4.5) & (df["review_count"] >= 10000)
+    if "rank" in df.columns:
+        mask = mask & (df["rank"] <= 200)
+    rec = df[mask].copy()
+    rec = rec.sort_values("rank", ascending=True).head(20)
+    cols = ["asin", "brand", "title", "price", "rating", "review_count", "rank"]
+    if "unit_price" in rec.columns:
+        cols.append("unit_price")
+    return rec[[c for c in cols if c in rec.columns]]
 
 
 def safe_get_price_history(asin: str, all_df: pd.DataFrame) -> pd.DataFrame:
@@ -235,7 +241,9 @@ def safe_get_price_history(asin: str, all_df: pd.DataFrame) -> pd.DataFrame:
             return get_price_history(asin, all_df)
         except Exception:
             pass
-    hist = all_df[all_df["asin"] == asin][["date", "price"]].copy()
+    date_col = "date" if "date" in all_df.columns else "timestamp"
+    hist = all_df[all_df["asin"] == asin][[date_col, "price"]].copy()
+    hist = hist.rename(columns={date_col: "date"})
     if hist.empty:
         return _make_mock_price_history(asin)
     hist["date"] = pd.to_datetime(hist["date"])
@@ -336,10 +344,12 @@ def chart_brand_influence(df: pd.DataFrame) -> go.Figure:
 
 
 def chart_price_rank(df: pd.DataFrame) -> go.Figure:
-    """单粒价排行：按单粒价升序，无单粒价则用总价，前20条"""
+    """单粒价排行：y轴用商品名(前25字符)，每ASIN唯一，按单粒价升序，前20条"""
     import re as _re
+
     def _extract_count(t):
-        if not t: return None
+        if not t:
+            return None
         m = _re.search(r'(\d+)\s*(?:soft\s?gels?|softgels?|capsules?|caps?|tablets?|count|ct\.?)', str(t), _re.IGNORECASE)
         if m:
             n = int(m.group(1))
@@ -347,15 +357,22 @@ def chart_price_rank(df: pd.DataFrame) -> go.Figure:
         return None
 
     tmp = df.dropna(subset=["price"]).copy()
+    # 去重：每个ASIN只保留一条
+    if "asin" in tmp.columns:
+        tmp = tmp.drop_duplicates(subset=["asin"])
     if "unit_price" not in tmp.columns or tmp["unit_price"].isna().all():
-        tmp["unit_price"] = tmp.apply(lambda r: (r["price"] / c) if (c := _extract_count(r.get("title"))) else None, axis=1)
+        tmp["unit_price"] = tmp.apply(
+            lambda r: (r["price"] / c) if (c := _extract_count(r.get("title"))) else None,
+            axis=1,
+        )
     tmp["sort_price"] = tmp["unit_price"].fillna(tmp["price"] / 100)
     tmp = tmp.sort_values("sort_price").head(20)
     tmp["display_price"] = tmp.apply(
         lambda r: f"¢{r['unit_price']*100:.1f}/粒" if pd.notna(r.get("unit_price")) else f"${r['price']:.2f}",
-        axis=1
+        axis=1,
     )
-    tmp["label"] = tmp["brand"].fillna("?").apply(lambda x: x[:16])
+    # y轴用商品名前25字符
+    tmp["label"] = tmp["title"].fillna(tmp["brand"].fillna("?")).apply(lambda x: str(x)[:25])
 
     fig = px.bar(
         tmp, x="sort_price", y="label", orientation="h",
@@ -485,11 +502,23 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 📅 日期筛选")
-    selected_date = st.date_input(
-        "分析日期",
-        value=date.today(),
-        max_value=date.today(),
-    )
+
+    # 先加载数据检查有几个不同日期（用 all_data 或 latest_data 的 date 列）
+    _check_df = load_latest_data()
+    _unique_dates = []
+    if "date" in _check_df.columns:
+        _unique_dates = sorted(_check_df["date"].dropna().unique().tolist())
+
+    if len(_unique_dates) <= 1:
+        _date_str = _unique_dates[0] if _unique_dates else date.today().isoformat()
+        st.info(f"📅 当前仅有1天数据（{_date_str}），日期筛选在积累多日数据后生效")
+        selected_date = date.today()
+    else:
+        selected_date = st.date_input(
+            "分析日期",
+            value=date.today(),
+            max_value=date.today(),
+        )
 
     st.markdown("---")
     st.markdown("### 💲 价格区间筛选")
@@ -568,7 +597,7 @@ if module == "选品分析":
 
     st.markdown("---")
 
-    # ── 第二行：价格带分布 + 品牌集中度 ────────────────────────────────────
+    # ── 第二行：价格带分布 + 品牌BSR影响力 ─────────────────────────────────
     col_left, col_right = st.columns(2)
     with col_left:
         st.plotly_chart(
@@ -578,7 +607,7 @@ if module == "选品分析":
         )
     with col_right:
         st.plotly_chart(
-            chart_brand_price(filtered_df),
+            chart_brand_influence(filtered_df),
             use_container_width=True,
             config={"displayModeBar": False},
         )
@@ -604,14 +633,14 @@ if module == "选品分析":
 
     # ── 第四行：推荐商品列表 ────────────────────────────────────────────────
     st.subheader("🏆 推荐商品列表（高性价比）")
-    st.caption("筛选条件：评分 ≥ 4.5 · 评价数 ≥ 1000 · 价格 ≤ $30")
+    st.caption("筛选条件：排名 ≤ 200 · 评分 ≥ 4.5 · 评价数 ≥ 10,000 · 按排名升序")
 
     rec_df = safe_get_recommended_products(filtered_df)
 
     if rec_df.empty:
         st.info("当前筛选范围内暂无符合推荐条件的商品。")
     else:
-        # 列名中文化用于展示
+        # 如果有 unit_price 列，转换为分并加入展示
         display_cols = {
             "asin": "ASIN",
             "brand": "品牌",
@@ -619,20 +648,17 @@ if module == "选品分析":
             "price": "价格($)",
             "rating": "评分",
             "review_count": "评价数",
-            "rank": "销售排名",
+            "rank": "排名",
         }
         show_df = rec_df[[c for c in display_cols if c in rec_df.columns]].rename(
             columns=display_cols
         )
+        # 加入单粒价列（如果存在）
+        if "unit_price" in rec_df.columns:
+            show_df["单粒价(¢)"] = (rec_df["unit_price"].values * 100).round(2)
 
         st.dataframe(
-            show_df.style.highlight_max(
-                subset=["评分"] if "评分" in show_df.columns else [],
-                color="#1a4a6b",
-            ).highlight_min(
-                subset=["价格($)"] if "价格($)" in show_df.columns else [],
-                color="#1a6b3a",
-            ),
+            show_df,
             use_container_width=True,
             height=350,
         )
@@ -647,35 +673,17 @@ elif module == "价格监控":
     # ── 第一行：商品选择 ────────────────────────────────────────────────────
     st.subheader("🔍 商品价格监控")
 
-    if filtered_df.empty:
+    product_options = dict(zip(filtered_df["title"], filtered_df["asin"]))
+    if not product_options:
         st.warning("无可选商品，请调整筛选条件。")
         st.stop()
 
-    import re as _re_label
-
-    def make_product_label(row):
-        title = str(row.get('title', ''))
-        brand = str(row.get('brand', '?'))[:15]
-        price = f"${row.get('price', 0):.2f}"
-        # 提取mg含量
-        mg_match = _re_label.search(r'(\d+(?:,\d+)?)\s*mg', title, _re_label.IGNORECASE)
-        mg = mg_match.group(0) if mg_match else ''
-        # 提取粒数
-        count_match = _re_label.search(r'(\d+)\s*(?:softgels?|count|ct)', title, _re_label.IGNORECASE)
-        count = f"{count_match.group(1)}粒" if count_match else ''
-        return f"{brand} · {mg} · {count} · {price}"
-
-    labels = filtered_df.apply(make_product_label, axis=1).tolist()
-    asins = filtered_df["asin"].tolist()
-    titles = filtered_df["title"].tolist()
-
-    selected_label = st.selectbox(
-        "选择商品（品牌 · Omega含量 · 粒数 · 价格）",
-        options=labels,
+    selected_title = st.selectbox(
+        "选择商品",
+        options=list(product_options.keys()),
+        format_func=lambda x: x[:80] + "..." if len(x) > 80 else x,
     )
-    selected_idx = labels.index(selected_label)
-    selected_asin = asins[selected_idx]
-    selected_title = titles[selected_idx]
+    selected_asin = product_options[selected_title]
 
     # 选中商品简要信息
     selected_row = filtered_df[filtered_df["asin"] == selected_asin].iloc[0]
