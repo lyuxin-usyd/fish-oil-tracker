@@ -394,3 +394,12 @@ def get_top10_asins(df: pd.DataFrame) -> pd.DataFrame:
         result["title"] = result["asin"]
 
     return result[["asin", "title", "best_rank"]]
+
+
+# ── 函数名别名（兼容 app.py 的 import 名称）─────────────────────────────────
+get_price_band_distribution = get_price_distribution
+get_rank_rating_data = get_competition_scatter
+get_price_history = get_price_trend
+get_all_price_trends = get_market_price_trend
+get_promotion_events = get_promotion_patterns
+get_summary_stats = get_summary_metrics
