@@ -323,31 +323,45 @@ def chart_brand_pie(df: pd.DataFrame) -> go.Figure:
 def chart_scatter(df: pd.DataFrame) -> go.Figure:
     scatter_df = safe_get_rank_rating_data(df)
     scatter_df = scatter_df.dropna(subset=["rank", "rating", "review_count", "price"])
+    scatter_df = scatter_df.copy()
+    scatter_df["price_label"] = scatter_df["price"].apply(lambda x: f"${x:.0f}")
+    scatter_df["brand_short"] = scatter_df["brand"].fillna("?").apply(lambda x: x[:12])
 
-    fig = px.scatter(
-        scatter_df,
-        x="rank",
-        y="rating",
-        size="review_count",
-        color="price",
-        hover_data={"title": True, "brand": True, "price": True, "review_count": True},
-        title="排名 vs 评分（气泡大小=评价数，颜色=价格）",
-        template=PLOTLY_TEMPLATE,
-        color_continuous_scale="Blues",
-        size_max=40,
-        labels={
-            "rank": "销售排名",
-            "rating": "评分",
-            "review_count": "评价数",
-            "price": "价格($)",
-        },
-    )
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=scatter_df["rank"],
+        y=scatter_df["rating"],
+        mode="markers+text",
+        text=scatter_df["price_label"],
+        textposition="middle center",
+        textfont=dict(size=9, color="white", family="Arial Black"),
+        marker=dict(
+            size=scatter_df["review_count"].apply(lambda x: max(20, min(60, x / 1500))),
+            color=PRIMARY_COLOR,
+            opacity=0.75,
+            line=dict(width=1, color="white"),
+        ),
+        customdata=scatter_df[["title", "brand", "price", "review_count"]].values,
+        hovertemplate=(
+            "<b>%{customdata[1]}</b><br>"
+            "%{customdata[0]:.50s}<br>"
+            "价格: $%{customdata[2]:.2f}<br>"
+            "评分: %{y}<br>"
+            "评价数: %{customdata[3]:,}<br>"
+            "排名: #%{x}"
+            "<extra></extra>"
+        ),
+    ))
     fig.update_layout(
+        title="排名 vs 评分（气泡越大=评价数越多，标价=售价）",
+        template=PLOTLY_TEMPLATE,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         title_font_size=15,
         margin=dict(t=40, b=10, l=10, r=10),
-        coloraxis_colorbar=dict(title="价格($)"),
+        xaxis_title="销售排名（BSR）",
+        yaxis_title="评分",
+        showlegend=False,
     )
     return fig
 
