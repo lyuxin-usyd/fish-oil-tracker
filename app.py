@@ -356,23 +356,21 @@ def chart_price_rank(df: pd.DataFrame) -> go.Figure:
             return n if 20 <= n <= 1000 else None
         return None
 
-    tmp = df.dropna(subset=["price"]).copy()
-    # 去重：每个ASIN只保留一条
-    if "asin" in tmp.columns:
-        tmp = tmp.drop_duplicates(subset=["asin"])
+    tmp = df.dropna(subset=["price", "brand"]).copy()
     if "unit_price" not in tmp.columns or tmp["unit_price"].isna().all():
         tmp["unit_price"] = tmp.apply(
             lambda r: (r["price"] / c) if (c := _extract_count(r.get("title"))) else None,
             axis=1,
         )
     tmp["sort_price"] = tmp["unit_price"].fillna(tmp["price"] / 100)
-    tmp = tmp.sort_values("sort_price").head(20)
+    # 每个品牌只保留单粒价最低的一款
+    tmp = tmp.sort_values("sort_price").drop_duplicates(subset=["brand"], keep="first")
+    tmp = tmp.head(20)
     tmp["display_price"] = tmp.apply(
         lambda r: f"¢{r['unit_price']*100:.1f}/粒" if pd.notna(r.get("unit_price")) else f"${r['price']:.2f}",
         axis=1,
     )
-    # y轴用商品名前25字符
-    tmp["label"] = tmp["title"].fillna(tmp["brand"].fillna("?")).apply(lambda x: str(x)[:25])
+    tmp["label"] = tmp["brand"].apply(lambda x: str(x)[:20])
 
     fig = px.bar(
         tmp, x="sort_price", y="label", orientation="h",
