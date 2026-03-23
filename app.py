@@ -334,43 +334,66 @@ def chart_brand_price(df: pd.DataFrame) -> go.Figure:
 
 
 def chart_price_rank(df: pd.DataFrame) -> go.Figure:
-    """售价排行：按售价升序，显示品牌+价格，前20条"""
-    tmp = df.dropna(subset=["price", "rank"]).sort_values("price").head(20).copy()
-    tmp["label"] = tmp["brand"].fillna("?").apply(lambda x: x[:18]) + "  $" + tmp["price"].apply(lambda x: f"{x:.0f}")
+    """单粒价排行：按单粒价升序，无单粒价则用总价，前20条"""
+    import re as _re
+    def _extract_count(t):
+        if not t: return None
+        m = _re.search(r'(\d+)\s*(?:soft\s?gels?|softgels?|capsules?|caps?|tablets?|count|ct\.?)', str(t), _re.IGNORECASE)
+        if m:
+            n = int(m.group(1))
+            return n if 20 <= n <= 1000 else None
+        return None
+
+    tmp = df.dropna(subset=["price"]).copy()
+    if "unit_price" not in tmp.columns or tmp["unit_price"].isna().all():
+        tmp["unit_price"] = tmp.apply(lambda r: (r["price"] / c) if (c := _extract_count(r.get("title"))) else None, axis=1)
+    tmp["sort_price"] = tmp["unit_price"].fillna(tmp["price"] / 100)
+    tmp = tmp.sort_values("sort_price").head(20)
+    tmp["display_price"] = tmp.apply(
+        lambda r: f"¢{r['unit_price']*100:.1f}/粒" if pd.notna(r.get("unit_price")) else f"${r['price']:.2f}",
+        axis=1
+    )
+    tmp["label"] = tmp["brand"].fillna("?").apply(lambda x: x[:16])
+
     fig = px.bar(
-        tmp, x="price", y="label", orientation="h",
-        title="售价排行（低→高，前20）",
+        tmp, x="sort_price", y="label", orientation="h",
+        title="单粒价排行（低→高，前20）",
         template=PLOTLY_TEMPLATE,
         color_discrete_sequence=[PRIMARY_COLOR],
-        text=tmp["price"].apply(lambda x: f"${x:.2f}"),
-        labels={"price": "售价（$）", "label": ""},
+        text=tmp["display_price"],
+        labels={"sort_price": "单粒价（$）", "label": ""},
     )
     fig.update_traces(textposition="outside")
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        title_font_size=15, margin=dict(t=40, b=10, l=10, r=60),
+        title_font_size=15, margin=dict(t=40, b=10, l=10, r=80),
         height=max(300, len(tmp) * 30), yaxis=dict(tickfont=dict(size=11)),
     )
     return fig
 
 
 def chart_rating_rank(df: pd.DataFrame) -> go.Figure:
-    """评分排行：按评分降序，标注评价数，前20条"""
-    tmp = df.dropna(subset=["rating", "review_count"]).sort_values("rating", ascending=False).head(20).copy()
-    tmp["label"] = tmp["brand"].fillna("?").apply(lambda x: x[:18]) + "  ★" + tmp["rating"].apply(lambda x: f"{x:.1f}")
+    """评分排行：评分降序，同分按评价数降序，显示评分+评价数"""
+    tmp = (df.dropna(subset=["rating", "review_count"])
+             .sort_values(["rating", "review_count"], ascending=[False, False])
+             .drop_duplicates(subset=["asin"] if "asin" in df.columns else ["title"])
+             .head(20).copy())
+    tmp["label"] = tmp["brand"].fillna("?").apply(lambda x: x[:16])
+    tmp["text_label"] = tmp["rating"].apply(lambda x: f"{x:.1f}") + "  (" + tmp["review_count"].apply(lambda x: f"{int(x):,}评") + ")"
+
     fig = px.bar(
         tmp, x="rating", y="label", orientation="h",
-        title="评分排行（高→低，前20）",
+        title="评分排行（同分按评价数排）",
         template=PLOTLY_TEMPLATE,
         color_discrete_sequence=["#2ecc71"],
-        text=tmp["rating"].apply(lambda x: f"{x:.1f}"),
+        text=tmp["text_label"],
         labels={"rating": "评分", "label": ""},
     )
     fig.update_traces(textposition="outside")
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        title_font_size=15, margin=dict(t=40, b=10, l=10, r=60),
-        height=max(300, len(tmp) * 30), xaxis=dict(range=[3, 5.2]),
+        title_font_size=15, margin=dict(t=40, b=10, l=10, r=100),
+        height=max(300, len(tmp) * 30), xaxis=dict(range=[4.0, 5.3]),
         yaxis=dict(tickfont=dict(size=11)),
     )
     return fig

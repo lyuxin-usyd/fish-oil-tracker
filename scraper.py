@@ -33,7 +33,7 @@ TARGET_URLS = [
     "https://www.amazon.com/gp/bestsellers/hpc/6943343011?pg=2",
 ]
 
-FIELDNAMES = ["rank", "asin", "title", "brand", "price", "rating", "review_count", "timestamp"]
+FIELDNAMES = ["rank", "asin", "title", "brand", "price", "unit_price", "count", "rating", "review_count", "timestamp"]
 
 DELAY_MIN = 3
 DELAY_MAX = 5
@@ -241,6 +241,21 @@ def extract_asin_from_url(url: str) -> str | None:
     return None
 
 
+def extract_count(title: str):
+    """从标题提取胶囊/片数量"""
+    if not title:
+        return None
+    m = re.search(
+        r'(\d+)\s*(?:soft\s?gels?|softgels?|capsules?|caps?|tablets?|count|ct\.?|pieces?|servings?)',
+        title, re.IGNORECASE
+    )
+    if m:
+        n = int(m.group(1))
+        if 20 <= n <= 1000:
+            return n
+    return None
+
+
 FISH_OIL_KEYWORDS = [
     "fish oil", "omega-3", "omega 3", "omega3", "dha", "epa", "cod liver oil",
     "krill oil", "algae oil", "algal oil", "flaxseed oil", "fatty acid",
@@ -425,6 +440,8 @@ def _parse_grid_item(block, rank: int, timestamp: str) -> dict | None:
             "title": title,
             "brand": brand,
             "price": price,
+            "count": extract_count(title),
+            "unit_price": round(price / extract_count(title), 4) if price and extract_count(title) else None,
             "rating": rating,
             "review_count": review_count,
             "timestamp": timestamp,
@@ -475,6 +492,8 @@ def _parse_list_item(block, rank: int, timestamp: str) -> dict | None:
             "title": title,
             "brand": brand,
             "price": price,
+            "count": extract_count(title),
+            "unit_price": round(price / extract_count(title), 4) if price and extract_count(title) else None,
             "rating": rating,
             "review_count": review_count,
             "timestamp": timestamp,
@@ -520,6 +539,8 @@ def _parse_p13n_item(block, rank: int, timestamp: str) -> dict | None:
             "title": title,
             "brand": brand,
             "price": price,
+            "count": extract_count(title),
+            "unit_price": round(price / extract_count(title), 4) if price and extract_count(title) else None,
             "rating": rating,
             "review_count": review_count,
             "timestamp": timestamp,
@@ -564,6 +585,8 @@ def _parse_generic_item(block, asin: str, rank: int, timestamp: str) -> dict | N
             "title": title,
             "brand": brand,
             "price": price,
+            "count": extract_count(title),
+            "unit_price": round(price / extract_count(title), 4) if price and extract_count(title) else None,
             "rating": rating,
             "review_count": review_count,
             "timestamp": timestamp,
