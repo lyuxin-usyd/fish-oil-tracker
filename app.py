@@ -537,7 +537,7 @@ if module == "选品分析":
     st.plotly_chart(
         chart_scatter(filtered_df),
         use_container_width=True,
-        config={"displayModeBar": True},
+        config={"displayModeBar": False},
     )
 
     st.markdown("---")
@@ -615,7 +615,7 @@ elif module == "价格监控":
     st.plotly_chart(
         chart_price_line(history_df, selected_asin, selected_title),
         use_container_width=True,
-        config={"displayModeBar": True},
+        config={"displayModeBar": False},
     )
 
     st.markdown("---")
@@ -626,29 +626,20 @@ elif module == "价格监控":
     st.plotly_chart(
         chart_all_trends(trend_df),
         use_container_width=True,
-        config={"displayModeBar": True},
+        config={"displayModeBar": False},
     )
 
     st.markdown("---")
 
-    # ── 第四行：促销事件记录表 ──────────────────────────────────────────────
-    st.subheader("📋 促销事件记录（价格波动 >10%）")
-
-    promo_df = safe_get_promotion_events(history_df)
-
-    if promo_df.empty:
-        st.info("该商品近期无明显价格波动事件（波动幅度均在10%以内）。")
-    else:
-        st.dataframe(
-            promo_df.style.applymap(
-                lambda v: "color:#e74c3c" if isinstance(v, str) and "降价" in v else (
-                    "color:#2ecc71" if isinstance(v, str) and "涨价" in v else ""
-                ),
-                subset=["事件类型"] if "事件类型" in promo_df.columns else [],
-            ),
-            use_container_width=True,
-            height=300,
-        )
+    # ── 第四行：促销事件记录表（需要14天以上数据才显示）──────────────────────
+    days_of_data = history_df["date"].nunique() if (not history_df.empty and "date" in history_df.columns) else 0
+    if days_of_data >= 14:
+        st.subheader("📋 促销事件记录（价格波动 >10%）")
+        promo_df = safe_get_promotion_events(history_df)
+        if not promo_df.empty:
+            st.dataframe(promo_df, use_container_width=True, height=300)
+        else:
+            st.info("该商品近期无明显价格波动事件（波动幅度均在10%以内）。")
 
     # 底部提示
     st.markdown("---")
