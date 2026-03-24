@@ -666,14 +666,33 @@ if module == "选品分析":
             "price": "价格($)",
             "rating": "评分",
             "review_count": "评价数",
-            "rank": "BSR排名↑（越小越好）",
+            "rank": "畅销排名 Amazon BSR↑（数字越小=卖得越好）",
         }
         show_df = rec_df[[c for c in display_cols if c in rec_df.columns]].rename(
             columns=display_cols
         )
-        # 加入单粒价列（如果存在）
-        if "unit_price" in rec_df.columns:
-            show_df["单粒价(¢)"] = (rec_df["unit_price"].values * 100).round(2)
+        # 单粒价：优先用 unit_price 列，否则从标题解析粒数后计算
+        import re as _re_unit
+        def _calc_unit_price(row):
+            up = row.get("unit_price")
+            try:
+                v = float(up)
+                if v > 0:
+                    return round(v * 100, 2)
+            except (TypeError, ValueError):
+                pass
+            # fallback：从 title 解析粒数
+            title = str(row.get("title", ""))
+            m = _re_unit.search(r'(\d+)\s*(?:soft\s?gels?|softgels?|capsules?|caps?|tablets?|count|ct\.?)', title, _re_unit.IGNORECASE)
+            if m:
+                n = int(m.group(1))
+                if 20 <= n <= 1000:
+                    try:
+                        return round(float(row.get("price", 0)) / n * 100, 2)
+                    except (TypeError, ValueError):
+                        pass
+            return None
+        show_df["单粒价(¢)"] = rec_df.apply(_calc_unit_price, axis=1)
 
         st.dataframe(
             show_df,
