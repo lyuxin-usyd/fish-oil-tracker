@@ -394,9 +394,12 @@ def chart_price_rank(df: pd.DataFrame) -> go.Figure:
 def chart_rating_rank(df: pd.DataFrame) -> go.Figure:
     """评分排行：每个品牌取最高评分产品，评分降序，同分按评价数降序"""
     tmp = (df.dropna(subset=["rating", "review_count", "brand"])
+             .query("rating >= 4.1")
              .sort_values(["rating", "review_count"], ascending=[False, False])
              .drop_duplicates(subset=["brand"])
-             .head(15).copy())
+             .head(15)
+             .sort_values(["rating", "review_count"], ascending=[True, True])  # plotly 从下到上渲染，高分在上
+             .copy())
     tmp["label"] = tmp["brand"].apply(lambda x: str(x)[:25])
     tmp["text_label"] = tmp["rating"].apply(lambda x: f"★ {x:.1f}") + "  " + tmp["review_count"].apply(lambda x: f"({int(x):,}评)")
 
