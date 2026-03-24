@@ -392,28 +392,39 @@ def chart_price_rank(df: pd.DataFrame) -> go.Figure:
 
 
 def chart_rating_rank(df: pd.DataFrame) -> go.Figure:
-    """评分排行：评分降序，同分按评价数降序，显示评分+评价数"""
-    tmp = (df.dropna(subset=["rating", "review_count"])
+    """评分排行：每个品牌取最高评分产品，评分降序，同分按评价数降序"""
+    tmp = (df.dropna(subset=["rating", "review_count", "brand"])
              .sort_values(["rating", "review_count"], ascending=[False, False])
-             .drop_duplicates(subset=["asin"] if "asin" in df.columns else ["title"])
-             .head(20).copy())
-    tmp["label"] = tmp["brand"].fillna("?").apply(lambda x: x[:16])
-    tmp["text_label"] = tmp["rating"].apply(lambda x: f"{x:.1f}") + "  (" + tmp["review_count"].apply(lambda x: f"{int(x):,}评") + ")"
+             .drop_duplicates(subset=["brand"])
+             .head(15).copy())
+    tmp["label"] = tmp["brand"].apply(lambda x: str(x)[:25])
+    tmp["text_label"] = tmp["rating"].apply(lambda x: f"★ {x:.1f}") + "  " + tmp["review_count"].apply(lambda x: f"({int(x):,}评)")
 
-    fig = px.bar(
-        tmp, x="rating", y="label", orientation="h",
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=tmp["rating"] - 4.0,
+        y=tmp["label"],
+        orientation="h",
+        marker_color="#2ecc71",
+        text=tmp["text_label"],
+        textposition="inside",
+        insidetextanchor="end",
+        textfont=dict(color="white", size=12),
+        hovertemplate="%{y}<br>评分: %{customdata[0]:.1f}<br>评价数: %{customdata[1]:,}<extra></extra>",
+        customdata=tmp[["rating", "review_count"]].values,
+    ))
+    fig.update_layout(
         title="评分排行（同分按评价数排）",
         template=PLOTLY_TEMPLATE,
-        color_discrete_sequence=["#2ecc71"],
-        text=tmp["text_label"],
-        labels={"rating": "评分", "label": ""},
-    )
-    fig.update_traces(textposition="auto", cliponaxis=False)
-    fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        title_font_size=15, margin=dict(t=40, b=10, l=10, r=120),
-        height=max(300, len(tmp) * 30),
-        xaxis=dict(range=[4.0, 5.1]),
+        title_font_size=15, margin=dict(t=40, b=10, l=10, r=20),
+        height=max(300, len(tmp) * 35),
+        xaxis=dict(
+            range=[0, 1.2],
+            tickvals=[0, 0.2, 0.4, 0.6, 0.8, 1.0],
+            ticktext=["4.0", "4.2", "4.4", "4.6", "4.8", "5.0"],
+            title="评分",
+        ),
         yaxis=dict(tickfont=dict(size=11)),
     )
     return fig
