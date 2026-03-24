@@ -32,6 +32,10 @@ jobs:
       - name: Run scraper
         run: python scraper.py
 
+      - name: Fetch price history (CamelCamelCamel)
+        run: python fetch_history.py
+        continue-on-error: true
+
       - name: Commit data
         run: |
           git config user.name "github-actions[bot]"

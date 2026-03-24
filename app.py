@@ -145,12 +145,15 @@ def load_latest_data() -> pd.DataFrame:
 
     # 尝试从 data/ 目录读取最新文件
     try:
+        import re as _re_loader
         files = sorted(
-            [f for f in os.listdir(DATA_DIR) if f.startswith("products_") and f.endswith(".csv")],
+            [f for f in os.listdir(DATA_DIR) if _re_loader.match(r'^\d{4}-\d{2}-\d{2}\.csv$', f) and f != "all_data.csv"],
             reverse=True,
         )
         if files:
             df = pd.read_csv(os.path.join(DATA_DIR, files[0]), encoding='utf-8')
+            if "date" not in df.columns and "timestamp" in df.columns:
+                df["date"] = pd.to_datetime(df["timestamp"], errors="coerce").dt.date.astype(str)
             return df
     except Exception:
         pass
@@ -238,7 +241,11 @@ def safe_get_recommended_products(df: pd.DataFrame) -> pd.DataFrame:
 def safe_get_price_history(asin: str, all_df: pd.DataFrame) -> pd.DataFrame:
     if ANALYSIS_IMPORTED:
         try:
-            return get_price_history(asin, all_df)
+            result = get_price_history(all_df, asin)
+            if not result.empty and "avg_price" in result.columns and "price" not in result.columns:
+                result = result.rename(columns={"avg_price": "price"})
+            if not result.empty:
+                return result
         except Exception:
             pass
     date_col = "date" if "date" in all_df.columns else "timestamp"
@@ -263,11 +270,6 @@ def safe_get_all_price_trends(all_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def safe_get_promotion_events(history_df: pd.DataFrame) -> pd.DataFrame:
-    if ANALYSIS_IMPORTED:
-        try:
-            return get_promotion_events(history_df)
-        except Exception:
-            pass
     return _make_promotion_events(history_df)
 
 
@@ -529,6 +531,12 @@ with st.sidebar:
     )
 
     st.markdown("---")
+    st.markdown("### 🏷️ 品牌筛选")
+    _raw_brands = latest_df["brand"].dropna().unique().tolist() if "brand" in latest_df.columns else []
+    _all_brands = sorted([b for b in _raw_brands if b and str(b) not in ("nan", "None", "")])
+    selected_brands = st.multiselect("选择品牌（不选=全部）", options=_all_brands, default=[])
+
+    st.markdown("---")
     if ANALYSIS_IMPORTED:
         st.success("✅ analysis.py 已加载")
     else:
@@ -560,6 +568,10 @@ all_df = load_all_data()
 filtered_df = latest_df[
     (latest_df["price"] >= price_range[0]) & (latest_df["price"] <= price_range[1])
 ].copy()
+
+# 品牌筛选
+if selected_brands:
+    filtered_df = filtered_df[filtered_df["brand"].isin(selected_brands)].copy()
 
 if filtered_df.empty:
     st.warning("当前价格区间内没有商品数据，请调整筛选条件。")
