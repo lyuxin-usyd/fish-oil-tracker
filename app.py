@@ -151,7 +151,7 @@ def load_latest_data() -> pd.DataFrame:
             reverse=True,
         )
         if files:
-            df = pd.read_csv(os.path.join(DATA_DIR, files[0]), encoding='utf-8')
+            df = pd.read_csv(os.path.join(DATA_DIR, files[0]), encoding='utf-8', on_bad_lines='skip')
             if "date" not in df.columns and "timestamp" in df.columns:
                 df["date"] = pd.to_datetime(df["timestamp"], errors="coerce").dt.date.astype(str)
             return df
@@ -175,7 +175,7 @@ def load_all_data() -> pd.DataFrame:
     try:
         path = os.path.join(DATA_DIR, "all_data.csv")
         if os.path.exists(path):
-            return pd.read_csv(path, encoding='utf-8')
+            return pd.read_csv(path, encoding='utf-8', on_bad_lines='skip')
     except Exception:
         pass
 
