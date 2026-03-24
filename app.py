@@ -532,7 +532,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 🏷️ 品牌筛选")
-    _raw_brands = latest_df["brand"].dropna().unique().tolist() if "brand" in latest_df.columns else []
+    _raw_brands = _check_df["brand"].dropna().unique().tolist() if "brand" in _check_df.columns else []
     _all_brands = sorted([b for b in _raw_brands if b and str(b) not in ("nan", "None", "")])
     selected_brands = st.multiselect("选择品牌（不选=全部）", options=_all_brands, default=[])
 
