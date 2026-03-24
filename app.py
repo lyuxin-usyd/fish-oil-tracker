@@ -408,11 +408,12 @@ def chart_rating_rank(df: pd.DataFrame) -> go.Figure:
         text=tmp["text_label"],
         labels={"rating": "评分", "label": ""},
     )
-    fig.update_traces(textposition="outside")
+    fig.update_traces(textposition="auto", cliponaxis=False)
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        title_font_size=15, margin=dict(t=40, b=10, l=10, r=100),
-        height=max(300, len(tmp) * 30), xaxis=dict(range=[4.0, 5.3]),
+        title_font_size=15, margin=dict(t=40, b=10, l=10, r=120),
+        height=max(300, len(tmp) * 30),
+        xaxis=dict(range=[4.0, 5.1]),
         yaxis=dict(tickfont=dict(size=11)),
     )
     return fig
@@ -510,8 +511,6 @@ with st.sidebar:
         _unique_dates = sorted(_check_df["date"].dropna().unique().tolist())
 
     if len(_unique_dates) <= 1:
-        _date_str = _unique_dates[0] if _unique_dates else date.today().isoformat()
-        st.info(f"📅 当前仅有1天数据（{_date_str}），日期筛选在积累多日数据后生效")
         selected_date = date.today()
     else:
         selected_date = st.date_input(
@@ -536,11 +535,6 @@ with st.sidebar:
     _all_brands = sorted([b for b in _raw_brands if b and str(b) not in ("nan", "None", "")])
     selected_brands = st.multiselect("选择品牌（不选=全部）", options=_all_brands, default=[])
 
-    st.markdown("---")
-    if ANALYSIS_IMPORTED:
-        st.success("✅ analysis.py 已加载")
-    else:
-        st.warning("⚠️ 使用 Mock 数据演示\n（未找到 analysis.py）")
 
 
 # ── 页头 ──────────────────────────────────────────────────────────────────────
