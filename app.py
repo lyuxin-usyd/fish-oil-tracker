@@ -195,8 +195,9 @@ def safe_get_price_band_distribution(df: pd.DataFrame) -> pd.DataFrame:
             return get_price_band_distribution(df)
         except Exception:
             pass
-    bins = [0, 10, 20, 30, 40, 100]
-    labels = ["<$10", "$10-20", "$20-30", "$30-40", ">$40"]
+    max_p = df["price"].max() if not df.empty else 100
+    bins = [0, 15, 25, 35, 50, 75, max(100, max_p + 1)]
+    labels = ["<$15", "$15-25", "$25-35", "$35-50", "$50-75", ">$75"]
     df = df.copy()
     df["price_band"] = pd.cut(df["price"], bins=bins, labels=labels, right=False)
     return df.groupby("price_band", observed=True).size().reset_index(name="count")
@@ -245,28 +246,40 @@ def safe_get_price_history(asin: str, all_df: pd.DataFrame) -> pd.DataFrame:
             if not result.empty and "avg_price" in result.columns and "price" not in result.columns:
                 result = result.rename(columns={"avg_price": "price"})
             if not result.empty:
-                return result
+                result["date"] = pd.to_datetime(result["date"]).dt.date
+                result = result.groupby("date", as_index=False)["price"].mean()
+                result["date"] = pd.to_datetime(result["date"])
+                result["asin"] = asin
+                return result.sort_values("date").reset_index(drop=True)
         except Exception:
             pass
     date_col = "date" if "date" in all_df.columns else "timestamp"
     hist = all_df[all_df["asin"] == asin][[date_col, "price"]].copy()
     hist = hist.rename(columns={date_col: "date"})
     if hist.empty:
-        return _make_mock_price_history(asin)
+        return pd.DataFrame()  # 无数据时返回空，由调用方处理
+    hist["date"] = pd.to_datetime(hist["date"]).dt.date
+    hist = hist.groupby("date", as_index=False)["price"].mean()
     hist["date"] = pd.to_datetime(hist["date"])
     hist["asin"] = asin
     return hist.sort_values("date").reset_index(drop=True)
 
 
 def safe_get_all_price_trends(all_df: pd.DataFrame) -> pd.DataFrame:
+    date_col = "timestamp" if "timestamp" in all_df.columns and "date" not in all_df.columns else "date"
     if ANALYSIS_IMPORTED:
         try:
-            return get_all_price_trends(all_df)
+            result = get_all_price_trends(all_df)
+            if not result.empty and "date" in result.columns and "avg_price" in result.columns:
+                result["date"] = pd.to_datetime(result["date"])
+                return result.groupby("date", as_index=False)["avg_price"].mean()
         except Exception:
             pass
-    all_df = all_df.copy()
-    all_df["date"] = pd.to_datetime(all_df["date"])
-    return all_df.groupby("date")["price"].mean().reset_index(name="avg_price")
+    df = all_df.copy()
+    df["date"] = pd.to_datetime(df[date_col]).dt.date
+    result = df.groupby("date", as_index=False)["price"].mean().rename(columns={"price": "avg_price"})
+    result["date"] = pd.to_datetime(result["date"])
+    return result
 
 
 def safe_get_promotion_events(history_df: pd.DataFrame) -> pd.DataFrame:
@@ -473,6 +486,11 @@ def chart_price_line(history_df: pd.DataFrame, asin: str, title_name: str) -> go
         margin=dict(t=40, b=10, l=10, r=10),
         xaxis_title="日期",
         yaxis_title="价格($)",
+        xaxis=dict(
+            tickformat="%b %d, %Y",
+            dtick="D1",
+            ticklabelmode="period",
+        ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return fig
@@ -487,7 +505,8 @@ def chart_all_trends(trend_df: pd.DataFrame) -> go.Figure:
             mode="lines+markers",
             name="全品类均价",
             line=dict(color="#2ecc71", width=2),
-            marker=dict(size=4),
+            marker=dict(size=6),
+            hovertemplate="%{x|%Y-%m-%d}<br>均价: $%{y:.2f}<extra></extra>",
         )
     )
     fig.update_layout(
@@ -499,6 +518,11 @@ def chart_all_trends(trend_df: pd.DataFrame) -> go.Figure:
         margin=dict(t=40, b=10, l=10, r=10),
         xaxis_title="日期",
         yaxis_title="均价($)",
+        xaxis=dict(
+            tickformat="%m/%d",
+            dtick="D1",
+            ticklabelmode="period",
+        ),
     )
     return fig
 
@@ -518,34 +542,41 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 📅 日期筛选")
 
-    # 先加载数据检查有几个不同日期（用 all_data 或 latest_data 的 date 列）
-    _check_df = load_latest_data()
-    _unique_dates = []
-    if "date" in _check_df.columns:
-        _unique_dates = sorted(_check_df["date"].dropna().unique().tolist())
+    # 从 all_data.csv 中取所有可用日期
+    _all_df_pre = load_all_data()
+    _ts_col = "timestamp" if "timestamp" in _all_df_pre.columns else "date"
+    _available_dates = sorted(
+        pd.to_datetime(_all_df_pre[_ts_col], errors="coerce").dt.date.dropna().unique().tolist(),
+        reverse=True,
+    )
 
-    if len(_unique_dates) <= 1:
+    if len(_available_dates) == 0:
         selected_date = date.today()
+        st.caption("暂无历史数据")
+    elif len(_available_dates) == 1:
+        selected_date = _available_dates[0]
+        st.caption(f"仅有 {selected_date} 的数据")
     else:
-        selected_date = st.date_input(
-            "分析日期",
-            value=date.today(),
-            max_value=date.today(),
+        selected_date = st.selectbox(
+            "选择日期",
+            options=_available_dates,
+            format_func=lambda d: d.strftime("%Y-%m-%d"),
         )
 
     st.markdown("---")
     st.markdown("### 💲 价格区间筛选")
+    _max_price = int(_all_df_pre["price"].max()) + 10 if not _all_df_pre.empty else 100
     price_range = st.slider(
         "价格范围($)",
         min_value=0,
-        max_value=100,
-        value=(0, 100),
+        max_value=_max_price,
+        value=(0, _max_price),
         step=1,
     )
 
     st.markdown("---")
     st.markdown("### 🏷️ 品牌筛选")
-    _raw_brands = _check_df["brand"].dropna().unique().tolist() if "brand" in _check_df.columns else []
+    _raw_brands = _all_df_pre["brand"].dropna().unique().tolist() if "brand" in _all_df_pre.columns else []
     _all_brands = sorted([b for b in _raw_brands if b and str(b) not in ("nan", "None", "")])
     selected_brands = st.multiselect("选择品牌（不选=全部）", options=_all_brands, default=[])
 
@@ -561,16 +592,26 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+_data_mtime = ""
+_all_csv_path = os.path.join(os.path.dirname(__file__), "data", "all_data.csv")
+if os.path.exists(_all_csv_path):
+    _mtime = os.path.getmtime(_all_csv_path)
+    _data_mtime = datetime.fromtimestamp(_mtime).strftime("%Y-%m-%d %H:%M")
 st.markdown(
-    f"<p style='text-align:center; color:#888; font-size:13px;'>数据更新时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>",
+    f"<p style='text-align:center; color:#888; font-size:13px;'>数据最后更新：{_data_mtime or '暂无'}</p>",
     unsafe_allow_html=True,
 )
 st.markdown("---")
 
 # ── 加载并筛选数据 ────────────────────────────────────────────────────────────
 
-latest_df = load_latest_data()
 all_df = load_all_data()
+
+# 用 selected_date 过滤出当天快照作为 latest_df
+_ts_col_main = "timestamp" if "timestamp" in all_df.columns else "date"
+_day_mask = pd.to_datetime(all_df[_ts_col_main], errors="coerce").dt.date == selected_date
+_day_df = all_df[_day_mask].copy()
+latest_df = _day_df if not _day_df.empty else load_latest_data()
 
 # 价格筛选
 filtered_df = latest_df[
@@ -651,27 +692,15 @@ if module == "选品分析":
 
     # ── 第四行：推荐商品列表 ────────────────────────────────────────────────
     st.subheader("🏆 推荐商品列表（高性价比）")
-    st.caption("筛选条件：排名 ≤ 200 · 评分 ≥ 4.5 · 评价数 ≥ 10,000 · 按排名升序")
+    _total_in_data = len(filtered_df)
+    _rank_threshold = min(200, _total_in_data)
+    st.caption(f"筛选条件：BSR 排名 ≤ {_rank_threshold} · 评分 ≥ 4.5 · 评价数 ≥ 10,000 · 按排名升序")
 
     rec_df = safe_get_recommended_products(filtered_df)
 
     if rec_df.empty:
-        st.info("当前筛选范围内暂无符合推荐条件的商品。")
+        st.info("当前筛选范围内暂无符合推荐条件的商品（评分 ≥ 4.5 且评价数 ≥ 10,000）。")
     else:
-        # 如果有 unit_price 列，转换为分并加入展示
-        display_cols = {
-            "asin": "ASIN",
-            "brand": "品牌",
-            "title": "商品名称",
-            "price": "价格($)",
-            "rating": "评分",
-            "review_count": "评价数",
-            "rank": "畅销排名 Amazon BSR↑（数字越小=卖得越好）",
-        }
-        show_df = rec_df[[c for c in display_cols if c in rec_df.columns]].rename(
-            columns=display_cols
-        )
-        # 单粒价：优先用 unit_price 列，否则从标题解析粒数后计算
         import re as _re_unit
         def _calc_unit_price(row):
             up = row.get("unit_price")
@@ -681,7 +710,6 @@ if module == "选品分析":
                     return round(v * 100, 2)
             except (TypeError, ValueError):
                 pass
-            # fallback：从 title 解析粒数
             title = str(row.get("title", ""))
             m = _re_unit.search(r'(\d+)\s*(?:soft\s?gels?|softgels?|capsules?|caps?|tablets?|count|ct\.?)', title, _re_unit.IGNORECASE)
             if m:
@@ -692,12 +720,35 @@ if module == "选品分析":
                     except (TypeError, ValueError):
                         pass
             return None
+
+        show_df = rec_df.copy()
         show_df["单粒价(¢)"] = rec_df.apply(_calc_unit_price, axis=1)
+        show_df["Amazon链接"] = rec_df["asin"].apply(
+            lambda a: f"https://www.amazon.com/dp/{a}"
+        )
+        display_cols = {
+            "rank": "BSR排名",
+            "brand": "品牌",
+            "title": "商品名称",
+            "price": "价格($)",
+            "单粒价(¢)": "单粒价(¢)",
+            "rating": "评分",
+            "review_count": "评价数",
+            "Amazon链接": "Amazon链接",
+        }
+        show_df = show_df[[c for c in display_cols if c in show_df.columns]].rename(columns=display_cols)
 
         st.dataframe(
             show_df,
             use_container_width=True,
             height=350,
+            column_config={
+                "Amazon链接": st.column_config.LinkColumn("Amazon链接", display_text="查看 →"),
+                "BSR排名": st.column_config.NumberColumn("BSR排名", format="%d"),
+                "价格($)": st.column_config.NumberColumn("价格($)", format="$%.2f"),
+                "评分": st.column_config.NumberColumn("评分", format="%.1f ⭐"),
+                "评价数": st.column_config.NumberColumn("评价数", format="%d"),
+            },
         )
 
 
@@ -707,8 +758,25 @@ if module == "选品分析":
 
 elif module == "价格监控":
 
-    # ── 第一行：商品选择 ────────────────────────────────────────────────────
-    st.subheader("🔍 商品价格监控")
+    # ── 数据状态栏 ──────────────────────────────────────────────────────────
+    _all_dates = sorted(pd.to_datetime(all_df["timestamp" if "timestamp" in all_df.columns else "date"], errors="coerce").dt.date.dropna().unique()) if not all_df.empty else []
+    _days_count = len(_all_dates)
+    _last_date = _all_dates[-1].strftime("%Y-%m-%d") if _all_dates else "暂无"
+    _product_count = all_df["asin"].nunique() if not all_df.empty else 0
+
+    _s1, _s2, _s3, _s4 = st.columns(4)
+    _s1.metric("最后抓取", _last_date)
+    _s2.metric("已积累天数", f"{_days_count} 天")
+    _s3.metric("覆盖商品", f"{_product_count} 款")
+    _s4.metric("每日自动抓取", "09:00 ✓")
+
+    if _days_count < 7:
+        st.info(f"📅 数据积累中（{_days_count}/7 天）——折线图需要至少 2 天数据，价格波动分析需要 14 天。每天 09:00 自动更新。")
+
+    st.markdown("---")
+
+    # ── 商品选择 ────────────────────────────────────────────────────────────
+    st.subheader("🔍 单品价格追踪")
 
     product_options = dict(zip(filtered_df["title"], filtered_df["asin"]))
     if not product_options:
@@ -722,51 +790,71 @@ elif module == "价格监控":
     )
     selected_asin = product_options[selected_title]
 
-    # 选中商品简要信息
+    # 商品信息卡
     selected_row = filtered_df[filtered_df["asin"] == selected_asin].iloc[0]
+
+    # 计算价格变化（与历史最早记录对比）
+    history_df = safe_get_price_history(selected_asin, all_df)
+    price_delta = None
+    if not history_df.empty and len(history_df) >= 2:
+        earliest_price = history_df.iloc[0]["price"]
+        current_price = selected_row["price"]
+        price_delta = round(current_price - earliest_price, 2)
+
     info_col1, info_col2, info_col3, info_col4 = st.columns(4)
-    info_col1.metric("当前价格", f"${selected_row['price']:.2f}")
+    info_col1.metric(
+        "当前价格",
+        f"${selected_row['price']:.2f}",
+        delta=f"${price_delta:+.2f} vs 首日" if price_delta is not None else None,
+        delta_color="inverse",
+    )
     info_col2.metric("评分", f"{selected_row['rating']:.1f} ⭐")
     info_col3.metric("评价数", f"{int(selected_row['review_count']):,}")
-    info_col4.metric("品牌", selected_row["brand"])
+    _brand_display = selected_row["brand"] if str(selected_row["brand"]) not in ("nan", "None", "") else "—"
+    info_col4.metric("品牌", _brand_display)
 
     st.markdown("---")
 
-    # ── 第二行：单品价格折线图 ──────────────────────────────────────────────
-    history_df = safe_get_price_history(selected_asin, all_df)
+    # ── 单品价格折线图 ───────────────────────────────────────────────────────
+    days_of_data = len(history_df) if not history_df.empty else 0
 
-    st.plotly_chart(
-        chart_price_line(history_df, selected_asin, selected_title),
-        use_container_width=True,
-        config={"displayModeBar": False},
-    )
+    if days_of_data == 0:
+        st.warning(f"⚠️ 该商品（{selected_asin}）在历史数据中暂无记录，可能是新进榜单。明日抓取后将出现数据。")
+    elif days_of_data == 1:
+        st.info(f"📊 仅有 1 天数据，明日抓取后将显示价格趋势。当前价格：**${history_df.iloc[0]['price']:.2f}**（{str(history_df.iloc[0]['date'])[:10]}）")
+    else:
+        st.plotly_chart(
+            chart_price_line(history_df, selected_asin, selected_title),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
 
     st.markdown("---")
 
-    # ── 第三行：全品类价格走势 ──────────────────────────────────────────────
+    # ── 全品类价格走势 ───────────────────────────────────────────────────────
+    st.subheader("📈 全品类整体价格走势")
     trend_df = safe_get_all_price_trends(all_df)
 
-    st.plotly_chart(
-        chart_all_trends(trend_df),
-        use_container_width=True,
-        config={"displayModeBar": False},
-    )
+    if len(trend_df) < 2:
+        st.info("全品类走势需要至少 2 天数据，数据积累中。")
+    else:
+        st.plotly_chart(
+            chart_all_trends(trend_df),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
 
-    st.markdown("---")
-
-    # ── 第四行：促销事件记录表（需要14天以上数据才显示）──────────────────────
-    days_of_data = history_df["date"].nunique() if (not history_df.empty and "date" in history_df.columns) else 0
+    # ── 促销事件（14天以上才显示）──────────────────────────────────────────
     if days_of_data >= 14:
+        st.markdown("---")
         st.subheader("📋 促销事件记录（价格波动 >10%）")
         promo_df = safe_get_promotion_events(history_df)
         if not promo_df.empty:
             st.dataframe(promo_df, use_container_width=True, height=300)
         else:
-            st.info("该商品近期无明显价格波动事件（波动幅度均在10%以内）。")
+            st.info("近期无明显价格波动事件（波动幅度均在 10% 以内）。")
 
-    # 底部提示
     st.markdown("---")
     st.caption(
-        f"ASIN：{selected_asin} · 数据来源：{'analysis.py' if ANALYSIS_IMPORTED else 'Mock Data'} · "
-        f"分析日期：{selected_date.isoformat()}"
+        f"ASIN：{selected_asin} · 已积累 {_days_count} 天 · 最后更新：{_last_date}"
     )
